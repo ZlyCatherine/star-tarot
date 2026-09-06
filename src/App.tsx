@@ -12,11 +12,39 @@ type DrawnCard = PreparedCard & { revealed: boolean };
 type GestureSample = [x: number, y: number, time: number, pressure: number, dx: number, dy: number];
 type GesturePass = GestureSample[];
 type Point = { x: number; y: number };
-type ShuffleVisual = { x: number; y: number; angle: number; energy: number; active: boolean };
-type PendingShuffleFrame = { progress: number; visual: ShuffleVisual };
+type ShuffleVisual = { x: number; y: number; active: boolean };
+type ShuffleCardPose = { x: number; y: number; rotation: number; vx: number; vy: number; vRotation: number; z: number };
+type PendingShuffleFrame = { visual: ShuffleVisual };
 
 const WHEEL_STEP = 360 / tarotCards.length;
 const MAX_GESTURE_PASSES = 10;
+const SHUFFLE_CARD_COUNT = 22;
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function visualNoise(value: number) {
+  let hash = value | 0;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b);
+  hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 4294967296;
+}
+
+function createShuffleCardPoses(): ShuffleCardPose[] {
+  return Array.from({ length: SHUFFLE_CARD_COUNT }, (_, index) => {
+    const offset = index - (SHUFFLE_CARD_COUNT - 1) / 2;
+    return {
+      x: offset * 0.42,
+      y: offset * 0.08,
+      rotation: offset * 0.34,
+      vx: 0,
+      vy: 0,
+      vRotation: 0,
+      z: index + 1,
+    };
+  });
+}
 
 const iconBySpread: Record<TarotSpread['id'], typeof MoonStar> = {
   daily: MoonStar,
@@ -29,12 +57,6 @@ function randomUnit() {
   const value = new Uint32Array(1);
   window.crypto.getRandomValues(value);
   return value[0] / 4294967296;
-}
-
-function normalizeAngle(value: number) {
-  if (value > Math.PI) return value - Math.PI * 2;
-  if (value < -Math.PI) return value + Math.PI * 2;
-  return value;
 }
 
 function normalizeDegrees(value: number) {
@@ -97,35 +119,39 @@ function App() {
   const [question, setQuestion] = useState('');
   const [deck, setDeck] = useState<PreparedCard[]>([]);
   const [drawn, setDrawn] = useState<DrawnCard[]>([]);
-  const [shuffleProgress, setShuffleProgress] = useState(0);
   const [shufflePassCount, setShufflePassCount] = useState(0);
   const [finalizingShuffle, setFinalizingShuffle] = useState(false);
   const [departingCardId, setDepartingCardId] = useState<string | null>(null);
   const [pendingCardId, setPendingCardId] = useState<string | null>(null);
   const [wheelDragging, setWheelDragging] = useState(false);
-  const [shuffleVisual, setShuffleVisual] = useState<ShuffleVisual>({ x: 0, y: 0, angle: 0, energy: 0, active: false });
+  const [shuffleVisual, setShuffleVisual] = useState<ShuffleVisual>({ x: 0, y: 0, active: false });
 
   const shuffleSurfaceRef = useRef<HTMLDivElement>(null);
   const pointerActiveRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
-  const lastAngleRef = useRef<number | null>(null);
   const gesturePassesRef = useRef<GesturePass[]>([]);
   const activeGestureSamplesRef = useRef<GestureSample[]>([]);
   const gestureDistanceRef = useRef(0);
-  const gestureAngleRef = useRef(0);
   const gestureSaltRef = useRef(new Uint32Array(4));
   const shuffleRectRef = useRef<DOMRect | null>(null);
   const shuffleFrameRef = useRef(0);
+  const shufflePhysicsFrameRef = useRef(0);
+  const shufflePhysicsTimeRef = useRef(0);
   const pendingShuffleFrameRef = useRef<PendingShuffleFrame | null>(null);
+  const shuffleCardPosesRef = useRef<ShuffleCardPose[]>(createShuffleCardPoses());
   const wheelSurfaceRef = useRef<HTMLDivElement>(null);
   const wheelPointerActiveRef = useRef(false);
   const wheelRotationRef = useRef(0);
   const wheelCenterRef = useRef<Point | null>(null);
   const wheelFrameRef = useRef(0);
+  const wheelInertiaFrameRef = useRef(0);
   const wheelLayerKeyRef = useRef(Number.NaN);
   const forceWheelLayerSyncRef = useRef(false);
   const wheelLastAngleRef = useRef(0);
-  const wheelAccumulatedDragRef = useRef(0);
+  const wheelLastPointerRef = useRef<Point | null>(null);
+  const wheelDragDistanceRef = useRef(0);
+  const wheelPendingAngleRef = useRef(0);
+  const wheelDragGainRef = useRef(1.4);
   const wheelLastTimeRef = useRef(0);
   const wheelVelocityRef = useRef(0);
   const wheelMovedRef = useRef(false);
@@ -148,7 +174,9 @@ function App() {
     shuffleOperationRef.current += 1;
     if (departureTimerRef.current !== null) window.clearTimeout(departureTimerRef.current);
     if (shuffleFrameRef.current) window.cancelAnimationFrame(shuffleFrameRef.current);
+    if (shufflePhysicsFrameRef.current) window.cancelAnimationFrame(shufflePhysicsFrameRef.current);
     if (wheelFrameRef.current) window.cancelAnimationFrame(wheelFrameRef.current);
+    if (wheelInertiaFrameRef.current) window.cancelAnimationFrame(wheelInertiaFrameRef.current);
   }, []);
 
   function cancelPendingWork() {
@@ -161,34 +189,153 @@ function App() {
 
   function clearGesture() {
     if (shuffleFrameRef.current) window.cancelAnimationFrame(shuffleFrameRef.current);
+    if (shufflePhysicsFrameRef.current) window.cancelAnimationFrame(shufflePhysicsFrameRef.current);
     shuffleFrameRef.current = 0;
+    shufflePhysicsFrameRef.current = 0;
+    shufflePhysicsTimeRef.current = 0;
     pendingShuffleFrameRef.current = null;
     gesturePassesRef.current = [];
     activeGestureSamplesRef.current = [];
     gestureDistanceRef.current = 0;
-    gestureAngleRef.current = 0;
     lastPointRef.current = null;
-    lastAngleRef.current = null;
     pointerActiveRef.current = false;
     shuffleRectRef.current = null;
+    shuffleCardPosesRef.current = createShuffleCardPoses();
     window.crypto.getRandomValues(gestureSaltRef.current);
-    setShuffleProgress(0);
     setShufflePassCount(0);
-    setShuffleVisual({ x: 0, y: 0, angle: 0, energy: 0, active: false });
+    setShuffleVisual({ x: 0, y: 0, active: false });
   }
 
   function scrollPageTop() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
   }
 
+  function paintShuffleCards() {
+    shuffleSurfaceRef.current?.querySelectorAll<HTMLElement>('.shuffle-card').forEach((element) => {
+      const index = Number(element.dataset.shuffleIndex);
+      const pose = shuffleCardPosesRef.current[index];
+      if (!pose) return;
+      element.style.transform = `translate(calc(-50% + ${pose.x}px), calc(-50% + ${pose.y}px)) rotate(${pose.rotation}deg)`;
+      element.style.zIndex = String(pose.z);
+    });
+  }
+
+  function syncShuffleLayers() {
+    const poses = shuffleCardPosesRef.current;
+    poses
+      .map((pose, index) => ({ pose, index, depth: pose.y + pose.x * 0.045 }))
+      .sort((left, right) => left.depth - right.depth || left.index - right.index)
+      .forEach(({ pose }, layer) => {
+        pose.z = layer + 1;
+      });
+  }
+
+  function applyShuffleForces(dx: number, dy: number, point: Point, rect: DOMRect) {
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const pointerX = point.x - rect.width / 2;
+    const pointerY = point.y - rect.height * 0.48;
+    const directionX = dx / distance;
+    const directionY = dy / distance;
+    const phase = gestureDistanceRef.current / 34;
+    const poses = shuffleCardPosesRef.current;
+    const impulses = poses.map((pose, index) => {
+      const offsetX = pointerX - pose.x;
+      const offsetY = pointerY - pose.y;
+      const proximity = clamp(1 - Math.hypot(offsetX, offsetY) / 250, 0.06, 1);
+      const wave = 0.18 + ((Math.sin(phase + index * 1.73) + 1) / 2) * 0.82;
+      const individuality = 0.78 + visualNoise(index * 313 + 41) * 0.44;
+      const influence = proximity * wave * individuality;
+      const sideBias = visualNoise(index * 557 + 89) - 0.5;
+      return {
+        x: dx * (0.08 + influence * 0.32) + offsetX * influence * 0.004 - directionY * sideBias * distance * influence * 0.2,
+        y: dy * (0.08 + influence * 0.32) + offsetY * influence * 0.004 + directionX * sideBias * distance * influence * 0.2,
+        rotation: ((dx - dy) * 0.025 + sideBias * distance * 0.08) * influence,
+      };
+    });
+    const average = impulses.reduce((total, impulse) => ({
+      x: total.x + impulse.x / impulses.length,
+      y: total.y + impulse.y / impulses.length,
+      rotation: total.rotation + impulse.rotation / impulses.length,
+    }), { x: 0, y: 0, rotation: 0 });
+
+    poses.forEach((pose, index) => {
+      const impulse = impulses[index];
+      pose.vx += impulse.x - average.x * 0.92;
+      pose.vy += impulse.y - average.y * 0.92;
+      pose.vRotation += impulse.rotation - average.rotation * 0.75;
+      pose.vx = clamp(pose.vx, -11, 11);
+      pose.vy = clamp(pose.vy, -9, 9);
+      pose.vRotation = clamp(pose.vRotation, -3.2, 3.2);
+    });
+  }
+
+  function startShufflePhysics() {
+    if (shufflePhysicsFrameRef.current) return;
+    shufflePhysicsTimeRef.current = performance.now();
+    const animate = (time: number) => {
+      const frameScale = clamp((time - shufflePhysicsTimeRef.current) / 16.67, 0.45, 2);
+      shufflePhysicsTimeRef.current = time;
+      const friction = Math.pow(pointerActiveRef.current ? 0.9 : 0.87, frameScale);
+      let moving = pointerActiveRef.current;
+
+      shuffleCardPosesRef.current.forEach((pose) => {
+        pose.x += pose.vx * frameScale;
+        pose.y += pose.vy * frameScale;
+        pose.rotation += pose.vRotation * frameScale;
+
+        if (pose.x < -124 || pose.x > 124) {
+          pose.x = clamp(pose.x, -124, 124);
+          pose.vx *= -0.28;
+        }
+        if (pose.y < -88 || pose.y > 88) {
+          pose.y = clamp(pose.y, -88, 88);
+          pose.vy *= -0.28;
+        }
+        if (pose.rotation < -66 || pose.rotation > 66) {
+          pose.rotation = clamp(pose.rotation, -66, 66);
+          pose.vRotation *= -0.22;
+        }
+
+        pose.vx *= friction;
+        pose.vy *= friction;
+        pose.vRotation *= friction;
+        if (Math.abs(pose.vx) + Math.abs(pose.vy) + Math.abs(pose.vRotation) > 0.035) moving = true;
+      });
+
+      syncShuffleLayers();
+      paintShuffleCards();
+      if (moving) {
+        shufflePhysicsFrameRef.current = window.requestAnimationFrame(animate);
+        return;
+      }
+      shuffleCardPosesRef.current.forEach((pose) => {
+        pose.vx = 0;
+        pose.vy = 0;
+        pose.vRotation = 0;
+      });
+      shufflePhysicsFrameRef.current = 0;
+      shufflePhysicsTimeRef.current = 0;
+    };
+    shufflePhysicsFrameRef.current = window.requestAnimationFrame(animate);
+  }
+
+  function stopWheelInertia() {
+    if (wheelInertiaFrameRef.current) window.cancelAnimationFrame(wheelInertiaFrameRef.current);
+    wheelInertiaFrameRef.current = 0;
+  }
+
   function resetWheel() {
+    stopWheelInertia();
     if (wheelFrameRef.current) window.cancelAnimationFrame(wheelFrameRef.current);
     wheelFrameRef.current = 0;
     wheelPointerActiveRef.current = false;
     wheelCenterRef.current = null;
+    wheelLastPointerRef.current = null;
+    wheelPendingAngleRef.current = 0;
     wheelRotationRef.current = 0;
     wheelLayerKeyRef.current = Number.NaN;
     forceWheelLayerSyncRef.current = false;
+    setWheelDragging(false);
   }
 
   function chooseSpread(selected: TarotSpread) {
@@ -223,10 +370,7 @@ function App() {
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     pointerActiveRef.current = true;
     gestureDistanceRef.current = 0;
-    gestureAngleRef.current = 0;
-    setShuffleProgress(0);
     lastPointRef.current = point;
-    lastAngleRef.current = Math.atan2(point.y - rect.height / 2, point.x - rect.width / 2);
     activeGestureSamplesRef.current = [[Math.round(point.x * 10), Math.round(point.y * 10), Math.round(event.timeStamp), Math.round(event.pressure * 1000), 0, 0]];
     setShuffleVisual((current) => ({ ...current, x: point.x / rect.width - 0.5, y: point.y / rect.height - 0.5, active: true }));
   }
@@ -244,9 +388,6 @@ function App() {
     if (distance < 1.5) return;
 
     gestureDistanceRef.current += distance;
-    const angle = Math.atan2(point.y - rect.height / 2, point.x - rect.width / 2);
-    if (lastAngleRef.current !== null) gestureAngleRef.current += Math.abs(normalizeAngle(angle - lastAngleRef.current));
-    lastAngleRef.current = angle;
     lastPointRef.current = point;
 
     if (activeGestureSamplesRef.current.length < 720) {
@@ -256,16 +397,13 @@ function App() {
       ]);
     }
 
-    const distanceProgress = gestureDistanceRef.current / 420;
-    const angleProgress = gestureAngleRef.current / (Math.PI * 1.25);
-    const progress = Math.min(100, Math.floor(Math.min(distanceProgress, angleProgress) * 100));
+    applyShuffleForces(dx, dy, point, rect);
+    startShufflePhysics();
+
     pendingShuffleFrameRef.current = {
-      progress,
       visual: {
         x: point.x / rect.width - 0.5,
         y: point.y / rect.height - 0.5,
-        angle,
-        energy: Math.min(1, distance / 22 + progress / 160),
         active: true,
       },
     };
@@ -275,7 +413,6 @@ function App() {
         const pending = pendingShuffleFrameRef.current;
         if (!pending) return;
         pendingShuffleFrameRef.current = null;
-        setShuffleProgress(pending.progress);
         setShuffleVisual(pending.visual);
       });
     }
@@ -294,10 +431,9 @@ function App() {
     pointerActiveRef.current = false;
     shuffleRectRef.current = null;
     lastPointRef.current = null;
-    lastAngleRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    setShuffleVisual((current) => ({ ...current, active: false, energy: current.energy * 0.45 }));
-    setShuffleProgress(0);
+    paintShuffleCards();
+    setShuffleVisual((current) => ({ ...current, active: false }));
   }
 
   async function finishShuffle(withGesture: boolean) {
@@ -320,6 +456,8 @@ function App() {
       setDeck(prepareDeck(random));
       setDrawn([]);
       setPendingCardId(null);
+      if (shufflePhysicsFrameRef.current) window.cancelAnimationFrame(shufflePhysicsFrameRef.current);
+      shufflePhysicsFrameRef.current = 0;
       resetWheel();
       setStage('draw');
       scrollPageTop();
@@ -330,6 +468,7 @@ function App() {
 
   function selectFanCard(index: number) {
     if (!spread || departingCardId || drawn.length >= spread.positions.length) return;
+    if (wheelPointerActiveRef.current || wheelInertiaFrameRef.current) return;
     if (performance.now() < suppressCardClickUntilRef.current) return;
     const selected = deck[index];
     if (!selected) return;
@@ -356,14 +495,20 @@ function App() {
 
   function beginWheelDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (pendingCardId || departingCardId) return;
+    const wasMoving = Boolean(wheelInertiaFrameRef.current);
+    stopWheelInertia();
+    if (wasMoving) suppressCardClickUntilRef.current = performance.now() + 120;
     const disc = event.currentTarget.querySelector<HTMLElement>('.card-wheel-disc');
     const discRect = disc?.getBoundingClientRect();
     const centerX = discRect ? discRect.left + discRect.width / 2 : event.currentTarget.getBoundingClientRect().left + event.currentTarget.clientWidth / 2;
     const centerY = discRect ? discRect.top + discRect.height / 2 : event.currentTarget.getBoundingClientRect().bottom;
     wheelCenterRef.current = { x: centerX, y: centerY };
     wheelPointerActiveRef.current = true;
+    wheelLastPointerRef.current = { x: event.clientX, y: event.clientY };
     wheelLastAngleRef.current = Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI;
-    wheelAccumulatedDragRef.current = 0;
+    wheelDragDistanceRef.current = 0;
+    wheelPendingAngleRef.current = 0;
+    wheelDragGainRef.current = event.pointerType === 'touch' ? 1.65 : 1.4;
     wheelLastTimeRef.current = event.timeStamp;
     wheelVelocityRef.current = 0;
     wheelMovedRef.current = false;
@@ -377,7 +522,8 @@ function App() {
     wheelSurfaceRef.current?.querySelectorAll<HTMLElement>('.fan-card-space').forEach((element) => {
       const slot = Number(element.dataset.wheelSlot);
       if (!Number.isFinite(slot)) return;
-      element.style.zIndex = String(wheelDepth(normalizeDegrees(slot * WHEEL_STEP + rotation)));
+      const angle = normalizeDegrees(slot * WHEEL_STEP + rotation);
+      if (force || Math.abs(angle) <= 82) element.style.zIndex = String(wheelDepth(angle));
     });
   }
 
@@ -399,34 +545,67 @@ function App() {
     if (!center) return;
     const pointerAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
     const angleDelta = normalizeDegrees(pointerAngle - wheelLastAngleRef.current);
+    const lastPointer = wheelLastPointerRef.current;
     const elapsed = Math.max(8, event.timeStamp - wheelLastTimeRef.current);
+    if (lastPointer) wheelDragDistanceRef.current += Math.hypot(event.clientX - lastPointer.x, event.clientY - lastPointer.y);
+    wheelLastPointerRef.current = { x: event.clientX, y: event.clientY };
     wheelLastAngleRef.current = pointerAngle;
     wheelLastTimeRef.current = event.timeStamp;
-    wheelAccumulatedDragRef.current += Math.abs(angleDelta);
-    if (wheelAccumulatedDragRef.current <= 1.2) return;
+    const boostedDelta = angleDelta * wheelDragGainRef.current;
+    wheelPendingAngleRef.current += boostedDelta;
+    const instantVelocity = boostedDelta / elapsed;
+    wheelVelocityRef.current = wheelVelocityRef.current * 0.72 + instantVelocity * 0.28;
+    if (wheelDragDistanceRef.current <= 6) return;
     if (!wheelMovedRef.current) {
       wheelMovedRef.current = true;
       event.currentTarget.setPointerCapture(event.pointerId);
       setWheelDragging(true);
     }
-    wheelVelocityRef.current = angleDelta / elapsed;
-    wheelRotationRef.current += angleDelta;
+    wheelRotationRef.current += wheelPendingAngleRef.current;
+    wheelPendingAngleRef.current = 0;
     scheduleWheelPaint();
+  }
+
+  function startWheelInertia(initialVelocity: number) {
+    stopWheelInertia();
+    let velocity = clamp(initialVelocity, -0.55, 0.55);
+    let lastTime = performance.now();
+    const step = (time: number) => {
+      const elapsed = Math.min(32, Math.max(8, time - lastTime));
+      lastTime = time;
+      wheelRotationRef.current += velocity * elapsed;
+      velocity *= Math.pow(0.86, elapsed / 16.67);
+      scheduleWheelPaint();
+      if (Math.abs(velocity) > 0.008) {
+        wheelInertiaFrameRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+      wheelInertiaFrameRef.current = 0;
+      suppressCardClickUntilRef.current = performance.now() + 100;
+      setWheelDragging(false);
+      scheduleWheelPaint(true);
+    };
+    wheelInertiaFrameRef.current = window.requestAnimationFrame(step);
   }
 
   function endWheelDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (!wheelPointerActiveRef.current) return;
     wheelPointerActiveRef.current = false;
     wheelCenterRef.current = null;
+    wheelLastPointerRef.current = null;
+    wheelPendingAngleRef.current = 0;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    setWheelDragging(false);
     if (wheelMovedRef.current) {
       suppressCardClickUntilRef.current = performance.now() + 220;
-      const momentum = Math.max(-28, Math.min(28, wheelVelocityRef.current * 90));
-      window.requestAnimationFrame(() => {
-        wheelRotationRef.current += momentum;
+      if (Math.abs(wheelVelocityRef.current) > 0.012) {
+        setWheelDragging(true);
+        startWheelInertia(wheelVelocityRef.current);
+      } else {
+        setWheelDragging(false);
         scheduleWheelPaint(true);
-      });
+      }
+    } else {
+      setWheelDragging(false);
     }
   }
 
@@ -453,13 +632,11 @@ function App() {
   }
 
   function shuffleCardStyle(index: number): CSSProperties {
-    const offset = index - 10.5;
-    const phase = shuffleVisual.angle + index * 0.73;
-    const spreadAmount = 8 + shuffleVisual.energy * 86;
-    const x = Math.cos(phase) * spreadAmount + shuffleVisual.x * (28 + (index % 4) * 6);
-    const y = Math.sin(phase) * spreadAmount * 0.62 + shuffleVisual.y * (24 + (index % 3) * 7);
-    const rotation = offset * 0.7 + Math.sin(phase) * shuffleVisual.energy * 28;
-    return { transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) rotate(${rotation}deg)` };
+    const pose = shuffleCardPosesRef.current[index];
+    return {
+      transform: `translate(calc(-50% + ${pose.x}px), calc(-50% + ${pose.y}px)) rotate(${pose.rotation}deg)`,
+      zIndex: pose.z,
+    };
   }
 
   function wheelCardStyle(item: PreparedCard, fallbackIndex: number): CSSProperties {
@@ -544,12 +721,9 @@ function App() {
             role="region"
             aria-label="在牌堆上画圈洗牌"
           >
-            <div className="gesture-ring" style={{ '--gesture-progress': `${shuffleProgress * 3.6}deg` } as CSSProperties}>
-              <span />
-            </div>
             <div className="shuffle-deck" aria-hidden="true">
-              {Array.from({ length: 22 }, (_, index) => (
-                <span className="shuffle-card" style={shuffleCardStyle(index)} key={index}><CardBack /></span>
+              {Array.from({ length: SHUFFLE_CARD_COUNT }, (_, index) => (
+                <span className="shuffle-card" data-shuffle-index={index} style={shuffleCardStyle(index)} key={index}><CardBack /></span>
               ))}
             </div>
             <span
@@ -557,7 +731,6 @@ function App() {
               style={{ left: `${(shuffleVisual.x + 0.5) * 100}%`, top: `${(shuffleVisual.y + 0.5) * 100}%` }}
               aria-hidden="true"
             />
-            <div className="gesture-instruction"><Hand /><strong>{shuffleVisual.active ? '继续画圈' : shufflePassCount > 0 ? '可以继续洗牌' : '按住并画圈'}</strong><span>{shuffleVisual.active ? '顺着你的感觉移动' : shufflePassCount > 0 ? '洗好后就开始抽牌' : '在牌堆上慢慢画圈'}</span></div>
           </div>
           <div className="shuffle-actions">
             <button type="button" className="text-action" onClick={() => finishShuffle(false)} disabled={finalizingShuffle}>帮我洗牌</button>
@@ -629,7 +802,7 @@ function App() {
 
           {allRevealed && (
             <section className="interpretations" aria-labelledby="interpretation-title">
-              <div className="interpretation-heading"><div><p className="step-label">牌面解读</p><h2 id="interpretation-title">留意彼此呼应的线索</h2></div><Button variant="outline" className="outline-button" onClick={() => chooseSpread(spread)}><RefreshCw />重新抽取</Button></div>
+              <div className="interpretation-heading"><h2 id="interpretation-title">牌面解读</h2><Button variant="outline" className="outline-button" onClick={() => chooseSpread(spread)}><RefreshCw />重新抽取</Button></div>
               <div className="interpretation-list">{drawn.map((item, index) => {
                 const position = spread.positions[index];
                 const meaning = item.reversed ? item.card.reversed : item.card.upright;

@@ -80,7 +80,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px sol
 .select-view { padding-top: clamp(3.25rem, 8vw, 7rem); }
 .hero-copy { max-width: 44rem; }
 .kicker, .step-label { display: flex; align-items: center; gap: .5rem; margin: 0 0 1rem; font-size: .72rem; font-weight: 650; letter-spacing: .2em; color: #c8a96b; text-transform: uppercase; }
-.kicker svg, .step-label svg, .fan-meta svg, .reveal-hint svg, .gesture-instruction > svg { width: 1rem; height: 1rem; flex: 0 0 1rem; stroke-width: 1.8; }
+.kicker svg, .step-label svg, .fan-meta svg, .reveal-hint svg { width: 1rem; height: 1rem; flex: 0 0 1rem; stroke-width: 1.8; }
 .hero-copy h1, .focus-view > h1, .reading-heading h1 { margin: 0; font-family: 'STSong', 'Songti SC', 'Noto Serif SC', serif; font-weight: 500; }
 .hero-copy h1 { font-size: clamp(2.5rem, 6vw, 4.4rem); line-height: 1.1; color: #f7efd8; }
 .hero-copy h1 span { display: block; color: #c8a96b; }
@@ -133,25 +133,13 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px sol
   box-shadow: inset 0 1px rgb(255 255 255 / 3%), 0 25px 70px rgb(0 0 0 / 22%);
   cursor: grab; touch-action: none; user-select: none; transition: border-color .35s ease, box-shadow .35s ease;
 }
-.shuffle-surface::before { position: absolute; inset: 8%; border: 1px solid rgb(200 169 107 / 9%); border-radius: 50%; content: ''; }
-.shuffle-surface::after { position: absolute; inset: 18% 29%; border: 1px solid rgb(200 169 107 / 8%); border-radius: 50%; content: ''; transform: rotate(28deg); }
 .shuffle-surface.is-touching { cursor: grabbing; border-color: rgb(218 186 121 / 32%); }
 .shuffle-surface.has-passes { border-color: rgb(218 186 121 / 42%); box-shadow: inset 0 0 65px rgb(177 137 75 / 7%), 0 25px 70px rgb(0 0 0 / 22%); }
-.gesture-ring {
-  position: absolute; left: 50%; top: 50%; z-index: 1; display: grid; width: min(70vw, 20rem); aspect-ratio: 1; place-items: center;
-  border-radius: 50%; background: conic-gradient(rgb(200 169 107 / 46%) var(--gesture-progress), rgb(200 169 107 / 7%) 0); transform: translate(-50%, -50%);
-  mask: radial-gradient(circle, transparent 67%, black 68% 70%, transparent 71%);
-}
-.gesture-ring span { color: transparent; }
 .shuffle-deck { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.shuffle-card { position: absolute; left: 50%; top: 48%; display: block; width: clamp(7.3rem, 20vw, 9rem); aspect-ratio: 350 / 600; transition: transform 70ms linear; will-change: transform; }
+.shuffle-card { position: absolute; left: 50%; top: 48%; display: block; width: clamp(7.3rem, 20vw, 9rem); aspect-ratio: 350 / 600; will-change: transform; }
 .shuffle-card .card-back { box-shadow: inset 0 0 0 4px #21172e, inset 0 0 0 5px rgb(200 169 107 / 38%), 0 8px 22px rgb(0 0 0 / 20%); }
 .gesture-cursor { position: absolute; z-index: 5; width: 1.2rem; height: 1.2rem; border: 1px solid #dfc37d; border-radius: 50%; background: rgb(208 181 116 / 20%); box-shadow: 0 0 0 8px rgb(208 181 116 / 6%), 0 0 24px rgb(208 181 116 / 35%); opacity: 0; pointer-events: none; transform: translate(-50%, -50%); transition: opacity .15s ease; }
 .gesture-cursor.is-visible { opacity: 1; }
-.gesture-instruction { position: absolute; bottom: 1.4rem; left: 50%; z-index: 6; display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: .65rem; min-width: 13rem; border: 1px solid rgb(200 169 107 / 16%); border-radius: 999px; background: rgb(10 7 15 / 70%); padding: .65rem 1rem; backdrop-filter: blur(12px); transform: translateX(-50%); }
-.gesture-instruction > svg { grid-row: 1 / 3; width: 1.1rem; color: #c8a96b; }
-.gesture-instruction strong { font-size: .76rem; font-weight: 600; color: #d7c9a8; }
-.gesture-instruction span { font-size: .65rem; color: #776e83; }
 .shuffle-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.25rem; }
 .text-action { min-height: 2.75rem; border: 0; border-radius: 999px; background: transparent; padding: .75rem 1rem; color: #776e83; cursor: pointer; font-size: .75rem; text-decoration: underline; text-underline-offset: 4px; }
 .text-action:hover { color: #b5a88b; }
@@ -200,7 +188,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px sol
 .fan-meta span:first-child { display: flex; align-items: center; gap: .45rem; color: #ab9568; }
 .card-wheel { --wheel-radius: clamp(36rem, 56vw, 42rem); --wheel-center-y: calc(var(--wheel-radius) + 7rem); --wheel-rotation: 0deg; position: relative; z-index: 2; height: clamp(13rem, 24vw, 17rem); overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
 .card-wheel.is-dragging { cursor: grabbing; }
-.card-wheel-rotor { position: absolute; inset: 0; transform: rotate(var(--wheel-rotation)); transform-origin: 50% var(--wheel-center-y); transition: transform .48s cubic-bezier(.18,.78,.2,1); will-change: transform; }
+.card-wheel-rotor { position: absolute; inset: 0; transform: rotate(var(--wheel-rotation)); transform-origin: 50% var(--wheel-center-y); transition: transform .16s ease-out; will-change: transform; }
 .card-wheel-disc { position: absolute; left: 50%; top: var(--wheel-center-y); width: calc(var(--wheel-radius) * 1.82); aspect-ratio: 1; border-radius: 50%; pointer-events: none; transform: translate(-50%, -50%); }
 .card-wheel-disc span { display: none; }
 .card-wheel.is-dragging .card-wheel-rotor { transition: none; }
@@ -317,7 +305,6 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px sol
   .shuffle-heading h1 { font-size: 1.7rem; }
   .shuffle-heading > p:last-child { margin-top: .35rem; font-size: .75rem; line-height: 1.5; }
   .shuffle-surface { height: clamp(14rem, 58vh, 18rem); height: clamp(14rem, 58dvh, 18rem); min-height: 0; margin-top: .7rem; border-radius: 1rem; }
-  .gesture-instruction { bottom: .75rem; }
   .shuffle-actions { margin-top: .75rem; }
 }
 
