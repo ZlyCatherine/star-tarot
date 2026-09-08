@@ -663,8 +663,8 @@ function App() {
         <section className="select-view">
           <div className="hero-copy">
             <p className="kicker"><Sparkles />选择此刻需要的牌阵</p>
-            <h1>让牌面映照<span>你已经知道的答案</span></h1>
-            <p className="hero-description">安静片刻，想好你希望探索的主题。选择牌阵后，静心洗牌，再从完整牌环中抽出你选中的牌。</p>
+            <h1>让牌面揭示<span>你想要的答案</span></h1>
+            <p className="hero-description">安静片刻，确定希望探索的主题。选择牌阵后，静心洗牌，再从完整牌环中抽出你中意的牌。</p>
           </div>
           <div className="spread-grid">
             {tarotSpreads.map((item, index) => {
@@ -747,7 +747,7 @@ function App() {
             <div>
               <p className="step-label">{spread.name} · {spread.eyebrow}</p>
               <h1>{!allDrawn ? `为「${spread.positions[drawn.length]?.label}」选牌` : allRevealed ? '你的牌阵' : '翻开你选定的牌'}</h1>
-              <p>{!allDrawn ? `用手指拖动牌环，从剩余 ${deck.length} 张牌中找到你想选定的那张。` : allRevealed ? '慢慢阅读每个位置带来的线索。' : '这些牌已经由你亲自选定。牌面朝你时为正位，旋转 180° 时为逆位。'}</p>
+              <p>{!allDrawn ? `拖动牌环，从剩余 ${deck.length} 张牌中找到你想选定的那张。` : allRevealed ? '慢慢阅读每个位置带来的线索。' : '这些牌已经由你亲自选定。'}</p>
             </div>
             <span className="progress-pill" aria-live="polite">{progressText}</span>
           </div>
@@ -783,7 +783,7 @@ function App() {
                 onPointerUp={endWheelDrag}
                 onPointerCancel={endWheelDrag}
                 role="region"
-                aria-label="按住牌环并沿圆弧拖动"
+                aria-label="按住拖动牌环"
               >
                 <div className="card-wheel-rotor">
                   <div className="card-wheel-disc" aria-hidden="true"><span /></div>
@@ -794,7 +794,7 @@ function App() {
                   ))}
                 </div>
               </div>
-              <p className="fan-hint">拖动牌环浏览整副牌，轻点你选定的那张。</p>
+              <p className="fan-hint">拖动牌环浏览整副牌，轻触选择。</p>
             </section>
           )}
 
