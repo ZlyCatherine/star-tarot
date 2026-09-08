@@ -663,7 +663,7 @@ function App() {
         <section className="select-view">
           <div className="hero-copy">
             <p className="kicker"><Sparkles />选择此刻需要的牌阵</p>
-            <h1>让牌面揭示<span>你想要的答案</span></h1>
+            <h1>让牌面揭示<span>你想知道的答案</span></h1>
             <p className="hero-description">安静片刻，确定希望探索的主题。选择牌阵后，静心洗牌，再从完整牌环中抽出你中意的牌。</p>
           </div>
           <div className="spread-grid">
