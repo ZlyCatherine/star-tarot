@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowRight, ChevronLeft, Eye, Hand, Heart, MoonStar, RefreshCw, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { ArrowRight, ChevronLeft, Eye, Hand, Heart, KeyRound, MoonStar, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { AiReadingError, isAiServiceConfigured, requestAiReading } from './ai-client';
+import type { AiReadingRequest, AiReadingResponse } from './ai-types';
 import { tarotCards, tarotSpreads, type TarotCard, type TarotSpread } from './tarot-data';
 
 type Stage = 'select' | 'focus' | 'shuffle' | 'draw';
@@ -19,6 +21,15 @@ type PendingShuffleFrame = { visual: ShuffleVisual };
 const WHEEL_STEP = 360 / tarotCards.length;
 const MAX_GESTURE_PASSES = 10;
 const SHUFFLE_CARD_COUNT = 22;
+const AI_ACCESS_CODE_STORAGE_KEY = 'star-tarot-ai-access-code';
+
+function loadStoredAccessCode() {
+  try {
+    return window.sessionStorage.getItem(AI_ACCESS_CODE_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -125,6 +136,13 @@ function App() {
   const [pendingCardId, setPendingCardId] = useState<string | null>(null);
   const [wheelDragging, setWheelDragging] = useState(false);
   const [shuffleVisual, setShuffleVisual] = useState<ShuffleVisual>({ x: 0, y: 0, active: false });
+  const [aiResult, setAiResult] = useState<AiReadingResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [accessCode, setAccessCode] = useState(loadStoredAccessCode);
+  const [accessCodeInput, setAccessCodeInput] = useState('');
+  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
+  const [accessError, setAccessError] = useState('');
 
   const shuffleSurfaceRef = useRef<HTMLDivElement>(null);
   const pointerActiveRef = useRef(false);
@@ -158,6 +176,7 @@ function App() {
   const suppressCardClickUntilRef = useRef(0);
   const shuffleOperationRef = useRef(0);
   const departureTimerRef = useRef<number | null>(null);
+  const aiRequestRef = useRef<AbortController | null>(null);
 
   const allDrawn = Boolean(spread && drawn.length === spread.positions.length);
   const allRevealed = allDrawn && drawn.every((item) => item.revealed);
@@ -172,6 +191,7 @@ function App() {
 
   useEffect(() => () => {
     shuffleOperationRef.current += 1;
+    aiRequestRef.current?.abort();
     if (departureTimerRef.current !== null) window.clearTimeout(departureTimerRef.current);
     if (shuffleFrameRef.current) window.cancelAnimationFrame(shuffleFrameRef.current);
     if (shufflePhysicsFrameRef.current) window.cancelAnimationFrame(shufflePhysicsFrameRef.current);
@@ -181,6 +201,8 @@ function App() {
 
   function cancelPendingWork() {
     shuffleOperationRef.current += 1;
+    aiRequestRef.current?.abort();
+    aiRequestRef.current = null;
     if (departureTimerRef.current !== null) {
       window.clearTimeout(departureTimerRef.current);
       departureTimerRef.current = null;
@@ -340,6 +362,7 @@ function App() {
 
   function chooseSpread(selected: TarotSpread) {
     cancelPendingWork();
+    clearAiReadingState();
     setSpread(selected);
     setQuestion('');
     setDeck([]);
@@ -616,8 +639,121 @@ function App() {
     )));
   }
 
+  function clearAiReadingState() {
+    aiRequestRef.current?.abort();
+    aiRequestRef.current = null;
+    setAiResult(null);
+    setAiLoading(false);
+    setAiError('');
+    setAccessDialogOpen(false);
+    setAccessError('');
+  }
+
+  function openAccessDialog() {
+    setAccessCodeInput(accessCode);
+    setAccessError('');
+    setAccessDialogOpen(true);
+  }
+
+  function clearAccessCode() {
+    try {
+      window.sessionStorage.removeItem(AI_ACCESS_CODE_STORAGE_KEY);
+    } catch {
+      // sessionStorage may be unavailable in restricted browser modes.
+    }
+    setAccessCode('');
+    setAccessCodeInput('');
+    setAccessError('');
+  }
+
+  function cancelAiGeneration() {
+    aiRequestRef.current?.abort();
+    aiRequestRef.current = null;
+    setAiLoading(false);
+    setAiError('');
+  }
+
+  async function generateAiReading(code = accessCode) {
+    if (!spread || !allRevealed || aiLoading) return;
+    const normalizedCode = code.trim();
+    if (!normalizedCode) {
+      openAccessDialog();
+      return;
+    }
+    if (!isAiServiceConfigured()) {
+      setAiError('AI 解牌服务尚未配置，请稍后再试。');
+      return;
+    }
+
+    const payload: AiReadingRequest = {
+      question: question.trim(),
+      spreadId: spread.id,
+      spreadName: spread.name,
+      cards: drawn.map((item, index) => {
+        const position = spread.positions[index];
+        return {
+          positionId: position.id,
+          position: position.label,
+          helper: position.helper,
+          cardId: item.card.id,
+          nameZh: item.card.nameZh,
+          nameEn: item.card.nameEn,
+          orientation: item.reversed ? 'reversed' : 'upright',
+          keywords: item.card.keywords,
+          baseMeaning: item.reversed ? item.card.reversed : item.card.upright,
+        };
+      }),
+    };
+
+    const controller = new AbortController();
+    aiRequestRef.current?.abort();
+    aiRequestRef.current = controller;
+    setAiLoading(true);
+    setAiError('');
+    setAiResult(null);
+
+    try {
+      const result = await requestAiReading(payload, normalizedCode, controller.signal);
+      if (aiRequestRef.current !== controller) return;
+      setAiResult(result);
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+      if (error instanceof AiReadingError && error.code === 'invalid_access_code') {
+        clearAccessCode();
+        setAccessError(error.message);
+        setAccessDialogOpen(true);
+        return;
+      }
+      setAiError(error instanceof Error ? error.message : 'AI 解牌暂时无法完成，请稍后再试。');
+    } finally {
+      if (aiRequestRef.current === controller) {
+        aiRequestRef.current = null;
+        setAiLoading(false);
+      }
+    }
+  }
+
+  function submitAccessCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedCode = accessCodeInput.trim();
+    if (!normalizedCode) {
+      setAccessError('请输入访问码。');
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(AI_ACCESS_CODE_STORAGE_KEY, normalizedCode);
+    } catch {
+      // The in-memory value still works when sessionStorage is unavailable.
+    }
+    setAccessCode(normalizedCode);
+    setAccessError('');
+    setAccessDialogOpen(false);
+    void generateAiReading(normalizedCode);
+  }
+
   function resetReading() {
     cancelPendingWork();
+    clearAiReadingState();
     setStage('select');
     setSpread(null);
     setQuestion('');
@@ -801,19 +937,68 @@ function App() {
           {allDrawn && !allRevealed && <p className="reveal-hint"><Sparkles />{drawn.length === 1 ? '点击这张已选好的牌，将它翻开' : '依次点击你选好的牌，将它们翻开'}</p>}
 
           {allRevealed && (
-            <section className="interpretations" aria-labelledby="interpretation-title">
-              <div className="interpretation-heading"><h2 id="interpretation-title">牌面解读</h2><Button variant="outline" className="outline-button" onClick={() => chooseSpread(spread)}><RefreshCw />重新抽取</Button></div>
-              <div className="interpretation-list">{drawn.map((item, index) => {
-                const position = spread.positions[index];
-                const meaning = item.reversed ? item.card.reversed : item.card.upright;
-                return (
-                  <article className="meaning-card" key={`${position.id}-${item.card.id}`}>
-                    <div className={`meaning-image ${item.reversed ? 'is-reversed' : ''}`}><img src={`${import.meta.env.BASE_URL}cards/${item.card.image}`} alt="" /></div>
-                    <div className="meaning-copy"><p>{index + 1} · {position.label}<span>{item.reversed ? '逆位' : '正位'}</span></p><h3>{item.card.nameZh}<small>{item.card.nameEn}</small></h3><div className="keyword-row">{item.card.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div><p className="meaning-text"><strong>{position.helper}：</strong>{meaning}</p></div>
-                  </article>
-                );
-              })}</div>
-            </section>
+            <>
+              <section className="interpretations" aria-labelledby="interpretation-title">
+                <div className="interpretation-heading"><h2 id="interpretation-title">牌面解读</h2><Button variant="outline" className="outline-button" onClick={() => chooseSpread(spread)}><RefreshCw />重新抽取</Button></div>
+                <div className="interpretation-list">{drawn.map((item, index) => {
+                  const position = spread.positions[index];
+                  const meaning = item.reversed ? item.card.reversed : item.card.upright;
+                  return (
+                    <article className="meaning-card" key={`${position.id}-${item.card.id}`}>
+                      <div className={`meaning-image ${item.reversed ? 'is-reversed' : ''}`}><img src={`${import.meta.env.BASE_URL}cards/${item.card.image}`} alt="" /></div>
+                      <div className="meaning-copy"><p>{index + 1} · {position.label}<span>{item.reversed ? '逆位' : '正位'}</span></p><h3>{item.card.nameZh}<small>{item.card.nameEn}</small></h3><div className="keyword-row">{item.card.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div><p className="meaning-text"><strong>{position.helper}：</strong>{meaning}</p></div>
+                    </article>
+                  );
+                })}</div>
+              </section>
+
+              <section className="ai-reading" aria-labelledby="ai-reading-title">
+                <div className="ai-reading-heading">
+                  <div>
+                    <p className="step-label"><Sparkles />DEEPSEEK 解牌</p>
+                    <h2 id="ai-reading-title">AI 综合解读</h2>
+                    <p>结合完整牌阵与提问，生成一次整体解读。</p>
+                  </div>
+                  <div className="ai-access-actions">
+                    <Button variant="outline" className="outline-button" onClick={openAccessDialog}><KeyRound />访问码</Button>
+                    {accessCode && <button type="button" className="ai-clear-access" onClick={clearAccessCode}><Trash2 />清除</button>}
+                  </div>
+                </div>
+
+                {aiError && <p className="ai-error" role="alert">{aiError}</p>}
+
+                {aiLoading && (
+                  <div className="ai-loading" role="status" aria-live="polite">
+                    <span className="ai-loading-mark"><RefreshCw className="spinning" /></span>
+                    <div><strong>正在解读牌阵</strong><p>DeepSeek 正在整理这些牌面之间的联系。</p></div>
+                    <Button variant="ghost" className="quiet-button" onClick={cancelAiGeneration}>取消</Button>
+                  </div>
+                )}
+
+                {!aiLoading && !aiResult && (
+                  <div className="ai-reading-start">
+                    <Button className="gold-button ai-generate-button" onClick={() => void generateAiReading()}><Sparkles />生成综合解读</Button>
+                  </div>
+                )}
+
+                {!aiLoading && aiResult && (
+                  <div className="ai-result">
+                    <article className="ai-overview"><span>整体主题</span><p>{aiResult.reading.overview}</p></article>
+                    <div className="ai-position-list">{aiResult.reading.positions.map((position, index) => (
+                      <article className="ai-position-card" key={position.positionId}>
+                        <span>{index + 1}</span><div><h3>{position.title}</h3><p>{position.interpretation}</p></div>
+                      </article>
+                    ))}</div>
+                    <div className="ai-synthesis-grid">
+                      <article><span>牌面联系</span><p>{aiResult.reading.connections}</p></article>
+                      <article><span>{question.trim() ? '回应你的问题' : '综合回应'}</span><p>{aiResult.reading.answer}</p></article>
+                      <article><span>继续留意</span><p>{aiResult.reading.reflection}</p></article>
+                    </div>
+                    <div className="ai-result-footer"><small>由 DeepSeek · {aiResult.model} 生成</small><Button variant="outline" className="outline-button" onClick={() => void generateAiReading()}><RefreshCw />重新解读</Button></div>
+                  </div>
+                )}
+              </section>
+            </>
           )}
 
           <Dialog open={Boolean(pendingCardId && !allDrawn)} onOpenChange={(open) => {
@@ -831,6 +1016,39 @@ function App() {
                 </div>
               </DialogContent>
             )}
+          </Dialog>
+
+          <Dialog open={accessDialogOpen} onOpenChange={(open) => {
+            setAccessDialogOpen(open);
+            if (!open) setAccessError('');
+          }}>
+            <DialogContent className="access-dialog" showCloseButton={false}>
+              <span className="access-dialog-icon"><KeyRound /></span>
+              <p className="step-label">AI 解牌访问</p>
+              <DialogTitle>输入访问码</DialogTitle>
+              <DialogDescription>访问码只保留在当前标签页，用于调用本应用的 DeepSeek 解牌服务。</DialogDescription>
+              <form className="access-form" onSubmit={submitAccessCode}>
+                <label htmlFor="ai-access-code">访问码</label>
+                <input
+                  id="ai-access-code"
+                  type="password"
+                  value={accessCodeInput}
+                  onChange={(event) => {
+                    setAccessCodeInput(event.target.value);
+                    if (accessError) setAccessError('');
+                  }}
+                  autoComplete="current-password"
+                  maxLength={160}
+                  aria-invalid={Boolean(accessError)}
+                  autoFocus
+                />
+                {accessError && <p className="access-error" role="alert">{accessError}</p>}
+                <div className="confirm-actions">
+                  <DialogClose render={<Button variant="ghost" className="quiet-button" />}>取消</DialogClose>
+                  <Button className="gold-button" type="submit"><Sparkles />保存并生成</Button>
+                </div>
+              </form>
+            </DialogContent>
           </Dialog>
         </section>
       )}

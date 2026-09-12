@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:worker": "node --test worker/src/index.test.js"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
