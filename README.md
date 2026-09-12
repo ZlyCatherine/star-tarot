@@ -44,7 +44,7 @@ AI 解牌上线后，还需要在仓库的 Actions Variables 中配置公开变�
 
 ## DeepSeek Worker
 
-AI 接口位于 `worker/`，使用 Cloudflare Worker 保存并调用 DeepSeek 密钥。当前默认模型为 `deepseek-flash`。
+AI 接口位于 `worker/`，使用 Cloudflare Worker 保存并调用 DeepSeek 密钥。当前默认模型为 `deepseek-v4-flash`。
 
 本地准备：
 

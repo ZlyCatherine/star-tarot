@@ -93,7 +93,7 @@ select（选择牌阵）
 - 前端通过 `VITE_TAROT_AI_API_URL` 指向 Cloudflare Worker，并调用 `POST /interpret`。
 - 用户输入的是应用访问码 `TAROT_ACCESS_CODE`；访问码保存在 `sessionStorage`，关闭标签页后清除。
 - DeepSeek API Key 只配置为 Cloudflare Secret `DEEPSEEK_API_KEY`，不得写入前端环境变量、代码、GitHub 仓库或 GitHub Pages 构建产物。
-- Worker 默认调用 `https://api.deepseek.com/chat/completions`，模型为 `deepseek-flash`，关闭思考模式，开启 JSON Output，使用非流式响应。
+- Worker 默认调用 `https://api.deepseek.com/v1/chat/completions`，模型为 `deepseek-v4-flash`，关闭思考模式，开启 JSON Output，使用非流式响应。
 - 请求包含用户问题、牌阵、牌位、牌名、正逆位、关键词与基础牌义；服务端再次校验牌阵和牌位顺序。
 - 返回结构固定为 `overview`、`positions`、`connections`、`answer`、`reflection`；Worker 校验结构后才交给前端显示。
 - Worker 仅允许 GitHub Pages 正式来源和本地 `5173`、`4173` 端口；浏览器请求还需通过访问码验证。
@@ -119,7 +119,7 @@ select（选择牌阵）
 - `src/ai-client.ts`：前端 AI 请求、错误映射和响应结构校验。
 - `worker/src/index.js`：访问码校验、输入校验、DeepSeek 调用、JSON 输出校验和 CORS。
 - `worker/src/index.test.js`：Worker 数据、鉴权和 DeepSeek 请求契约测试。
-- `worker/wrangler.toml`：Cloudflare Worker 配置，默认模型为 `deepseek-flash`。
+- `worker/wrangler.toml`：Cloudflare Worker 配置，默认模型为 `deepseek-v4-flash`。
 - `.env.example` 与 `worker/.dev.vars.example`：仅含变量名和占位符，不得填入真实密钥后提交。
 - `public/cards/`：78 张历史 RWS 牌面扫描图。
 - `components/ui/`：通用 UI 组件；当前核心页面主要使用 Button 和 Dialog。

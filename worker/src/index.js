@@ -1,6 +1,6 @@
-const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
-const DEFAULT_MODEL = 'deepseek-flash';
-const ALLOWED_MODELS = new Set(['deepseek-flash', 'deepseek-v4-pro']);
+const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
+const DEFAULT_MODEL = 'deepseek-v4-flash';
+const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
 const MAX_REQUEST_BYTES = 16_000;
 const MAX_OUTPUT_TOKENS = 1_800;
 const ALLOWED_ORIGINS = new Set([
@@ -186,9 +186,17 @@ async function handleInterpret(request, env, origin) {
 
   if (!providerResponse.ok) {
     const status = providerResponse.status;
+    const providerError = await providerResponse.json().catch(() => null);
+    console.error('DeepSeek request failed', {
+      status,
+      code: normalizeText(providerError?.error?.code, 120),
+      type: normalizeText(providerError?.error?.type, 120),
+      message: normalizeText(providerError?.error?.message, 500),
+    });
     if (status === 401 || status === 403) return errorResponse('provider_auth_failed', 'AI 服务密钥配置有误。', 502, origin);
     if (status === 402) return errorResponse('provider_balance_empty', 'AI 服务余额不足。', 503, origin);
     if (status === 429) return errorResponse('provider_busy', 'DeepSeek 当前请求较多，请稍后再试。', 503, origin);
+    if (status === 400 || status === 404) return errorResponse('provider_request_invalid', 'DeepSeek 接口配置需要更新。', 502, origin);
     return errorResponse('provider_error', 'DeepSeek 暂时无法完成解读，请稍后再试。', 502, origin);
   }
 
