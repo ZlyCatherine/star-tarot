@@ -1,6 +1,6 @@
-const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
-const DEFAULT_MODEL = 'deepseek-v4-flash';
-const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
+const DEFAULT_DEEPSEEK_API_BASE = 'https://api.deepseek.com';
+const DEFAULT_MODEL = 'deepseek-flash';
+const ALLOWED_MODELS = new Set(['deepseek-flash', 'deepseek-v4-pro']);
 const MAX_REQUEST_BYTES = 16_000;
 const MAX_OUTPUT_TOKENS = 1_800;
 const ALLOWED_ORIGINS = new Set([
@@ -130,6 +130,43 @@ function createUserPrompt(payload) {
   return `请解读以下牌阵。严格按照系统消息中的 JSON 结构输出。\n${JSON.stringify(payload)}`;
 }
 
+async function readProviderFailure(response) {
+  const raw = await response.text();
+  let error = null;
+  try {
+    error = JSON.parse(raw);
+  } catch {
+    // Some upstream gateways return plain text, HTML, or an empty body.
+  }
+  return {
+    status: response.status,
+    statusText: normalizeText(response.statusText, 120),
+    contentType: normalizeText(response.headers.get('Content-Type'), 120),
+    hasTraceId: Boolean(response.headers.get('x-ds-trace-id')),
+    gatewayRequestId: normalizeText(response.headers.get('cf-aig-request-id'), 120),
+    gatewayTraceId: normalizeText(response.headers.get('cf-aig-trace-id'), 120),
+    code: normalizeText(error?.error?.code, 120),
+    type: normalizeText(error?.error?.type, 120),
+    message: normalizeText(error?.error?.message, 500),
+    raw,
+  };
+}
+
+function logProviderFailure(label, failure) {
+  console.error(label, {
+    status: failure.status,
+    statusText: failure.statusText,
+    contentType: failure.contentType,
+    hasTraceId: failure.hasTraceId,
+    gatewayRequestId: failure.gatewayRequestId,
+    gatewayTraceId: failure.gatewayTraceId,
+    code: failure.code,
+    type: failure.type,
+    message: failure.message,
+    raw: failure.message ? '' : normalizeText(failure.raw, 500),
+  });
+}
+
 async function handleInterpret(request, env, origin) {
   if (!env.DEEPSEEK_API_KEY || !env.TAROT_ACCESS_CODE) {
     return errorResponse('service_not_configured', 'AI 解牌服务尚未完成配置。', 503, origin);
@@ -158,20 +195,25 @@ async function handleInterpret(request, env, origin) {
 
   const configuredModel = env.DEEPSEEK_MODEL || DEFAULT_MODEL;
   const model = ALLOWED_MODELS.has(configuredModel) ? configuredModel : DEFAULT_MODEL;
+  const apiBase = (env.DEEPSEEK_API_BASE || DEFAULT_DEEPSEEK_API_BASE).replace(/\/+$/, '');
+  const deepseekEndpoint = `${apiBase}/chat/completions`;
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: createUserPrompt(payload) },
+  ];
+  const providerHeaders = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`,
+  };
   let providerResponse;
   try {
-    providerResponse = await fetch(DEEPSEEK_ENDPOINT, {
+    providerResponse = await fetch(deepseekEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`,
-      },
+      headers: providerHeaders,
       body: JSON.stringify({
         model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: createUserPrompt(payload) },
-        ],
+        messages,
         thinking: { type: 'disabled' },
         response_format: { type: 'json_object' },
         max_tokens: MAX_OUTPUT_TOKENS,
@@ -185,14 +227,9 @@ async function handleInterpret(request, env, origin) {
   }
 
   if (!providerResponse.ok) {
-    const status = providerResponse.status;
-    const providerError = await providerResponse.json().catch(() => null);
-    console.error('DeepSeek request failed', {
-      status,
-      code: normalizeText(providerError?.error?.code, 120),
-      type: normalizeText(providerError?.error?.type, 120),
-      message: normalizeText(providerError?.error?.message, 500),
-    });
+    const failure = await readProviderFailure(providerResponse);
+    logProviderFailure('DeepSeek request failed', failure);
+    const status = failure.status;
     if (status === 401 || status === 403) return errorResponse('provider_auth_failed', 'AI 服务密钥配置有误。', 502, origin);
     if (status === 402) return errorResponse('provider_balance_empty', 'AI 服务余额不足。', 503, origin);
     if (status === 429) return errorResponse('provider_busy', 'DeepSeek 当前请求较多，请稍后再试。', 503, origin);

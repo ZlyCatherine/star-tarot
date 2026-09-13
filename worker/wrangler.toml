@@ -3,4 +3,5 @@ main = "src/index.js"
 compatibility_date = "2026-09-12"
 
 [vars]
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_API_BASE = "https://gateway.ai.cloudflare.com/v1/306878d385a13a247357e3a9a2454cb4/star-tarot/deepseek"
+DEEPSEEK_MODEL = "deepseek-flash"

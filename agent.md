@@ -1,8 +1,8 @@
 # 星见塔罗｜Agent 接手说明
 
-最后核对日期：2026-09-12
+最后核对日期：2026-09-13
 当前分支：`main`
-当前基线：`6bf0131`，工作区包含待部署的 DeepSeek 解牌功能
+当前基线：以 `main` 分支最新提交为准；DeepSeek 解牌与 AI Gateway 已部署并完成真实调用验证
 GitHub：https://github.com/ZlyCatherine/star-tarot
 GitHub Pages：https://zlycatherine.github.io/star-tarot/
 
@@ -93,7 +93,7 @@ select（选择牌阵）
 - 前端通过 `VITE_TAROT_AI_API_URL` 指向 Cloudflare Worker，并调用 `POST /interpret`。
 - 用户输入的是应用访问码 `TAROT_ACCESS_CODE`；访问码保存在 `sessionStorage`，关闭标签页后清除。
 - DeepSeek API Key 只配置为 Cloudflare Secret `DEEPSEEK_API_KEY`，不得写入前端环境变量、代码、GitHub 仓库或 GitHub Pages 构建产物。
-- Worker 默认调用 `https://api.deepseek.com/v1/chat/completions`，模型为 `deepseek-v4-flash`，关闭思考模式，开启 JSON Output，使用非流式响应。
+- Worker 通过 Cloudflare AI Gateway `star-tarot` 调用 DeepSeek；网关基址由 `DEEPSEEK_API_BASE` 配置，模型为 `deepseek-flash`（DeepSeek V4.1 Flash），关闭思考模式，开启 JSON Output，使用非流式响应。
 - 请求包含用户问题、牌阵、牌位、牌名、正逆位、关键词与基础牌义；服务端再次校验牌阵和牌位顺序。
 - 返回结构固定为 `overview`、`positions`、`connections`、`answer`、`reflection`；Worker 校验结构后才交给前端显示。
 - Worker 仅允许 GitHub Pages 正式来源和本地 `5173`、`4173` 端口；浏览器请求还需通过访问码验证。
@@ -119,7 +119,7 @@ select（选择牌阵）
 - `src/ai-client.ts`：前端 AI 请求、错误映射和响应结构校验。
 - `worker/src/index.js`：访问码校验、输入校验、DeepSeek 调用、JSON 输出校验和 CORS。
 - `worker/src/index.test.js`：Worker 数据、鉴权和 DeepSeek 请求契约测试。
-- `worker/wrangler.toml`：Cloudflare Worker 配置，默认模型为 `deepseek-v4-flash`。
+- `worker/wrangler.toml`：Cloudflare Worker 配置，默认模型为 `deepseek-flash`。
 - `.env.example` 与 `worker/.dev.vars.example`：仅含变量名和占位符，不得填入真实密钥后提交。
 - `public/cards/`：78 张历史 RWS 牌面扫描图。
 - `components/ui/`：通用 UI 组件；当前核心页面主要使用 Button 和 Dialog。
@@ -170,6 +170,8 @@ git diff --check
 - 默认分支：`main`
 - 推送到 `main` 后由 GitHub Actions 自动部署 Pages。
 - Worker 需要单独部署到 Cloudflare；线上配置 `DEEPSEEK_API_KEY` 与 `TAROT_ACCESS_CODE` 两个 Secret。
+- Cloudflare AI Gateway `star-tarot` 已建立；日志、缓存、限流、重试和网关认证均关闭。Worker 继续用 Secret 中的 DeepSeek Key 完成上游鉴权。
+- Cloudflare Secret 原文无法读回。若本机直连或本机经 Gateway 可用、Worker 上游仍报错，先用已验证的密钥重新执行 `wrangler secret put DEEPSEEK_API_KEY`。2026-09-13 的故障最终由旧 Worker Secret 内容异常导致，覆盖 Secret 后，最小请求与完整 JSON 模式请求均验证成功。
 - GitHub Actions Variables 需要配置公开变量 `VITE_TAROT_AI_API_URL`，值为 Worker 根地址。
 - 发布前检查 `git status`，只提交本次任务涉及的文件，保留用户已有改动。
 - 图片授权和牌义来源变更时同步更新 `CREDITS.md`。

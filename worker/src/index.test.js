@@ -97,7 +97,7 @@ test('sends a validated JSON-mode request to DeepSeek', async () => {
   globalThis.fetch = async (url, init) => {
     providerRequest = { url, init, body: JSON.parse(init.body) };
     return Response.json({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       choices: [{
         message: {
           content: JSON.stringify({
@@ -126,16 +126,19 @@ test('sends a validated JSON-mode request to DeepSeek', async () => {
     const response = await worker.fetch(request, {
       DEEPSEEK_API_KEY: 'test-api-key',
       TAROT_ACCESS_CODE: 'friend-code',
-      DEEPSEEK_MODEL: 'deepseek-v4-flash',
+      DEEPSEEK_API_BASE: 'https://gateway.ai.cloudflare.com/v1/account/star-tarot/deepseek/',
+      DEEPSEEK_MODEL: 'deepseek-flash',
     });
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(providerRequest.url, 'https://api.deepseek.com/v1/chat/completions');
+    assert.equal(providerRequest.url, 'https://gateway.ai.cloudflare.com/v1/account/star-tarot/deepseek/chat/completions');
     assert.equal(providerRequest.init.headers.Authorization, 'Bearer test-api-key');
-    assert.equal(providerRequest.body.model, 'deepseek-v4-flash');
+    assert.equal(providerRequest.body.model, 'deepseek-flash');
     assert.deepEqual(providerRequest.body.thinking, { type: 'disabled' });
     assert.deepEqual(providerRequest.body.response_format, { type: 'json_object' });
+    assert.equal(providerRequest.body.max_tokens, 1_800);
+    assert.equal(providerRequest.body.temperature, 0.75);
     assert.equal(providerRequest.body.stream, false);
     assert.equal(body.reading.answer, '综合回应');
     assert.equal(body.usage.totalTokens, 200);

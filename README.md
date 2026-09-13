@@ -44,7 +44,7 @@ AI 解牌上线后，还需要在仓库的 Actions Variables 中配置公开变�
 
 ## DeepSeek Worker
 
-AI 接口位于 `worker/`，使用 Cloudflare Worker 保存并调用 DeepSeek 密钥。当前默认模型为 `deepseek-v4-flash`。
+AI 接口位于 `worker/`。Cloudflare Worker 保存 DeepSeek 密钥，并通过同账户的 `star-tarot` AI Gateway 调用 `deepseek-flash`（DeepSeek V4.1 Flash）。网关应关闭日志、缓存、限流、重试和网关认证；上游鉴权仍由 Worker Secret `DEEPSEEK_API_KEY` 完成。
 
 本地准备：
 
@@ -69,6 +69,8 @@ npx wrangler deploy --config worker/wrangler.toml
 ```
 
 `.env.local`、`.dev.vars` 和真实密钥均不会提交到 GitHub。
+
+Cloudflare 会隐藏已经保存的 Secret 原文。遇到上游鉴权异常时，使用已在本机验证通过的密钥重新执行 `wrangler secret put DEEPSEEK_API_KEY`，可排除录入错误、旧值或多余字符。
 
 Worker 数据校验测试：
 
